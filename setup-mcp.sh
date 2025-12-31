@@ -248,13 +248,13 @@ EOF
     echo -e "${GREEN}.mcp.json created in $project_dir${NC}"
 }
 
-# Install serena-init helper script
+# Install mcp-init helper script
 install_serena_init() {
-    echo -e "${YELLOW}Installing serena-init helper...${NC}"
+    echo -e "${YELLOW}Installing mcp-init helper...${NC}"
 
     mkdir -p "$HOME/.local/bin"
 
-    cat > "$HOME/.local/bin/serena-init" << 'INITEOF'
+    cat > "$HOME/.local/bin/mcp-init" << 'INITEOF'
 #!/bin/bash
 # Create .mcp.json with all MCP servers for current directory
 
@@ -319,8 +319,8 @@ echo "Created .mcp.json with all MCP servers in $PROJECT_DIR"
 echo "Servers: serena, filesystem, git, github, docker, ros-mcp"
 INITEOF
 
-    chmod +x "$HOME/.local/bin/serena-init"
-    echo -e "${GREEN}serena-init installed to ~/.local/bin/${NC}"
+    chmod +x "$HOME/.local/bin/mcp-init"
+    echo -e "${GREEN}mcp-init installed to ~/.local/bin/${NC}"
 }
 
 # Main
@@ -344,7 +344,7 @@ main() {
             echo "  - pio-mcp: PlatformIO for embedded development"
             echo "  - ros-mcp: ROS robot control"
             echo ""
-            echo "Run 'serena-init' in any project directory to add Serena + all MCP servers"
+            echo "Run 'mcp-init' in any project directory to add Serena + all MCP servers"
             ;;
         pio)
             setup_pio_mcp
@@ -361,11 +361,11 @@ main() {
         project)
             generate_project_mcp_json "${2:-$(pwd)}"
             ;;
-        serena-init)
+        mcp-init)
             install_serena_init
             ;;
         *)
-            echo "Usage: $0 [all|pio|ros|official|settings|project [dir]|serena-init]"
+            echo "Usage: $0 [all|pio|ros|official|settings|project [dir]|mcp-init]"
             exit 1
             ;;
     esac

@@ -45,7 +45,7 @@ chmod +x setup-mcp.sh
 2. pio-mcp-server をクローン＆セットアップ
 3. ros-mcp-server をクローン＆セットアップ
 4. `~/.claude/settings.json` にグローバル設定を生成
-5. `serena-init` ヘルパースクリプトをインストール
+5. `mcp-init` ヘルパースクリプトをインストール
 
 ### 個別セットアップ
 
@@ -75,7 +75,7 @@ chmod +x setup-mcp.sh
 
 ```bash
 cd /path/to/your/project
-serena-init
+mcp-init
 ```
 
 これにより `.mcp.json` が作成され、以下のサーバーがそのプロジェクトで利用可能になります:
