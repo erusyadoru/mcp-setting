@@ -34,6 +34,14 @@ check_dependencies() {
         exit 1
     fi
 
+    if ! command -v npx &> /dev/null; then
+        echo -e "${YELLOW}Warning: npx not found. Some MCP servers (filesystem, git) require Node.js${NC}"
+    fi
+
+    if ! command -v docker &> /dev/null; then
+        echo -e "${YELLOW}Warning: docker not found. Docker MCP server requires Docker${NC}"
+    fi
+
     echo -e "${GREEN}Dependencies OK${NC}"
 }
 
@@ -75,15 +83,85 @@ setup_ros_mcp() {
     echo -e "${GREEN}ros-mcp-server setup complete${NC}"
 }
 
+# Setup official MCP servers (filesystem, git, github, docker)
+setup_official_mcp_servers() {
+    echo -e "${YELLOW}Setting up official MCP servers...${NC}"
+
+    # Check for npx (Node.js)
+    if command -v npx &> /dev/null; then
+        echo -e "${GREEN}Node.js found - filesystem and git MCP servers available${NC}"
+    else
+        echo -e "${YELLOW}Installing Node.js for filesystem/git MCP servers...${NC}"
+        # Try to install via package manager
+        if command -v apt-get &> /dev/null; then
+            sudo apt-get update && sudo apt-get install -y nodejs npm
+        elif command -v brew &> /dev/null; then
+            brew install node
+        else
+            echo -e "${RED}Please install Node.js manually${NC}"
+        fi
+    fi
+
+    # Check for GitHub CLI (for GitHub MCP)
+    if command -v gh &> /dev/null; then
+        echo -e "${GREEN}GitHub CLI found - github MCP server available${NC}"
+    else
+        echo -e "${YELLOW}Installing GitHub CLI...${NC}"
+        if command -v apt-get &> /dev/null; then
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            sudo apt-get update && sudo apt-get install -y gh
+        elif command -v brew &> /dev/null; then
+            brew install gh
+        else
+            echo -e "${YELLOW}Please install GitHub CLI manually: https://cli.github.com/${NC}"
+        fi
+    fi
+
+    echo -e "${GREEN}Official MCP servers setup complete${NC}"
+}
+
 # Generate Claude Code global settings
 generate_claude_settings() {
     echo -e "${YELLOW}Generating Claude Code settings...${NC}"
 
     mkdir -p "$CLAUDE_SETTINGS_DIR"
 
+    # Get GitHub token if available
+    local github_token=""
+    if command -v gh &> /dev/null; then
+        github_token=$(gh auth token 2>/dev/null || echo "")
+    fi
+
     cat > "$CLAUDE_SETTINGS_FILE" << EOF
 {
   "mcpServers": {
+    "filesystem": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "$HOME"],
+      "env": {}
+    },
+    "git": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-git"],
+      "env": {}
+    },
+    "github": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${github_token:-YOUR_GITHUB_TOKEN}"
+      }
+    },
+    "docker": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/QuantGeekDev/docker-mcp", "docker-mcp"],
+      "env": {}
+    },
     "pio-mcp": {
       "type": "stdio",
       "command": "$PIO_MCP_DIR/venv/bin/python",
@@ -101,6 +179,10 @@ generate_claude_settings() {
 EOF
 
     echo -e "${GREEN}Claude settings written to $CLAUDE_SETTINGS_FILE${NC}"
+
+    if [ -z "$github_token" ] || [ "$github_token" = "YOUR_GITHUB_TOKEN" ]; then
+        echo -e "${YELLOW}Note: GitHub MCP requires authentication. Run 'gh auth login' then re-run this script.${NC}"
+    fi
 }
 
 # Generate project-local .mcp.json with Serena
@@ -108,6 +190,12 @@ generate_project_mcp_json() {
     local project_dir="${1:-$(pwd)}"
 
     echo -e "${YELLOW}Generating .mcp.json for $project_dir...${NC}"
+
+    # Get GitHub token if available
+    local github_token=""
+    if command -v gh &> /dev/null; then
+        github_token=$(gh auth token 2>/dev/null || echo "")
+    fi
 
     cat > "$project_dir/.mcp.json" << EOF
 {
@@ -121,6 +209,29 @@ generate_project_mcp_json() {
         "--context", "claude-code",
         "--project", "$project_dir"
       ]
+    },
+    "filesystem": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "$project_dir"]
+    },
+    "git": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-git"]
+    },
+    "github": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${github_token:-YOUR_GITHUB_TOKEN}"
+      }
+    },
+    "docker": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/QuantGeekDev/docker-mcp", "docker-mcp"]
     },
     "ros-mcp": {
       "type": "stdio",
@@ -143,12 +254,18 @@ install_serena_init() {
 
     mkdir -p "$HOME/.local/bin"
 
-    cat > "$HOME/.local/bin/serena-init" << 'EOF'
+    cat > "$HOME/.local/bin/serena-init" << 'INITEOF'
 #!/bin/bash
-# Create .mcp.json with Serena for current directory
+# Create .mcp.json with all MCP servers for current directory
 
 PROJECT_DIR="$(pwd)"
 ROS_MCP_DIR="${ROS_MCP_DIR:-$HOME/ros-mcp-server}"
+
+# Get GitHub token if available
+GITHUB_TOKEN=""
+if command -v gh &> /dev/null; then
+    GITHUB_TOKEN=$(gh auth token 2>/dev/null || echo "YOUR_GITHUB_TOKEN")
+fi
 
 cat > .mcp.json << EOFJ
 {
@@ -163,6 +280,29 @@ cat > .mcp.json << EOFJ
         "--project", "$PROJECT_DIR"
       ]
     },
+    "filesystem": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "$PROJECT_DIR"]
+    },
+    "git": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-git"]
+    },
+    "github": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "$GITHUB_TOKEN"
+      }
+    },
+    "docker": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/QuantGeekDev/docker-mcp", "docker-mcp"]
+    },
     "ros-mcp": {
       "type": "stdio",
       "command": "uv",
@@ -175,8 +315,9 @@ cat > .mcp.json << EOFJ
 }
 EOFJ
 
-echo "Created .mcp.json for Serena + ROS-MCP in $PROJECT_DIR"
-EOF
+echo "Created .mcp.json with all MCP servers in $PROJECT_DIR"
+echo "Servers: serena, filesystem, git, github, docker, ros-mcp"
+INITEOF
 
     chmod +x "$HOME/.local/bin/serena-init"
     echo -e "${GREEN}serena-init installed to ~/.local/bin/${NC}"
@@ -188,20 +329,31 @@ main() {
 
     case "${1:-all}" in
         all)
+            setup_official_mcp_servers
             setup_pio_mcp
             setup_ros_mcp
             generate_claude_settings
             install_serena_init
             echo ""
             echo -e "${GREEN}=== Setup Complete ===${NC}"
-            echo "Global MCP servers (pio-mcp, ros-mcp) configured in ~/.claude/settings.json"
-            echo "Run 'serena-init' in any project directory to add Serena support"
+            echo "MCP servers configured in ~/.claude/settings.json:"
+            echo "  - filesystem: File system operations"
+            echo "  - git: Git repository operations"
+            echo "  - github: GitHub API integration"
+            echo "  - docker: Docker container management"
+            echo "  - pio-mcp: PlatformIO for embedded development"
+            echo "  - ros-mcp: ROS robot control"
+            echo ""
+            echo "Run 'serena-init' in any project directory to add Serena + all MCP servers"
             ;;
         pio)
             setup_pio_mcp
             ;;
         ros)
             setup_ros_mcp
+            ;;
+        official)
+            setup_official_mcp_servers
             ;;
         settings)
             generate_claude_settings
@@ -213,7 +365,7 @@ main() {
             install_serena_init
             ;;
         *)
-            echo "Usage: $0 [all|pio|ros|settings|project [dir]|serena-init]"
+            echo "Usage: $0 [all|pio|ros|official|settings|project [dir]|serena-init]"
             exit 1
             ;;
     esac
